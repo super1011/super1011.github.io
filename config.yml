@@ -1,0 +1,151 @@
+# 下文中出现 /rss 或者/rss_tmp 开头的路径均为本人映射到  docker 后的路径，可以自行根据自己情况修改，对应即可
+# 出现的/volume 路径均为硬件中的实际路径。 同样根据自己情况修改
+# 我的docker中是将  /volume3/downloads2/transmission/rss_tmp/bt 映射到了 /rss_tmp/bt
+#                  /volume3/downloads2/transmission/rss/bt 映射到了 /rss/bt
+# 所以请将这两个路径能对应上
+
+# 这里关闭 schedules 功能，也就是说没有启用 RSS，如何启用请看下文
+schedules:
+  - tasks: ['my-rss']
+    interval:
+      hours: 3
+  - tasks: ['check-tr']
+    interval:
+      hours: 1
+
+# 任务
+tasks:
+  my-rss:
+    inputs:
+      - rss: [rss-link]  #自行修改
+    template:
+      - anim
+    # 正则过滤，自行按需求修改，需要可以删掉
+    regexp:
+      reject:
+        - 720p
+        - 1080p@60FPS
+        - v2
+      from: title
+
+  move-episodes:
+    thetvdb_lookup: yes
+    metainfo_series: yes
+    accept_all: yes
+    seen: local
+    template:
+      - ANIMES
+    all_series:
+      parse_only: yes
+    filesystem:
+      # 下载目录, 按照docker映射的下载路径配置
+      path: /rss_tmp/bt/
+      recursive: yes
+      regexp: '.*\.(avi|mkv|mp4)$'
+    regexp:
+      reject:
+        - sample
+    move:
+      # 将要移动到的目录, 按照docker映射的下载路径配置
+      to: "/rss/anime/{{series_name}}/S{% if series_season|d(0) < 20 %}{{ '%02d' % series_season }}{% else %}01{% endif %}/"
+      rename: "{% if series_name is defined %}\u0009{{series_name}}{% endif %}{% if ((series_episode is defined) and (series_episode is number)) %}{{ ' - EP%02d' % series_episode }}{% endif %}"
+      along:
+        extensions:
+          - sub
+          - srt
+          - ass
+        subdirs:
+          - Subs
+
+  # 自动删除已完成的bt并 分类文件
+  check-tr:
+    from_transmission: 
+      host: host
+      port: 9091
+      username: username
+      password: password
+    disable: [seen, seen_info_hash]
+    if:
+      - "'/volume3/downloads2/transmission/rss_tmp/bt' in transmission_downloadDir and transmission_progress == 100" : accept
+    transmission:
+      path: /volume3/downloads2/transmission/rss_tmp/bt
+      host: host
+      port: 9091
+      username: username
+      password: password
+      action: remove
+    run_task:
+      when: accepted
+      task: 'move-episodes'
+
+# 预设模板
+templates:
+  anim:
+    accept_all: yes
+    transmission:
+      path: /volume3/downloads2/transmission/rss_tmp/bt
+      host: host
+      port: 9091
+      username: username
+      password: password
+      ratio: 1
+    domain_delay:
+      mikanani.me: 10 seconds
+    seen:
+      fields:
+        - url
+    content_size:
+      min: 30
+      max: 1500
+      strict: no
+
+  # 用于自动识别分类
+  ANIMES:
+    require_field: 
+      - series_name
+      - series_episode
+    configure_series:
+      from:
+        text:
+          url: [link or file]  #修改需要读取的文件，用于配置番名，一行一个
+          entry:
+            title: "(.*)"
+            url : "(.*)"
+    manipulate:
+      - title:
+          #### [KTXP][Yakusoku_no_Neverland_S2][01][GB][1080p] ### remove '_'
+          replace:
+            regexp: '_'
+            format: ' '
+      - title:
+          extract: '(?:\[.+?\]) (.+?) (\d*)(?:nd|rd|th) (?:.+? )-\s(\d+)\s\[(.+?)\]'
+      - title:
+          extract: '(?:\[.+?\]) (.+?) (\d*)(?:nd|rd|th) (?:Season )-\s(\d+)\s(?:END)\s\[(.+?)\].*'
+      - title:
+          extract: '(?:\[.+?\]) (.+?) (?:Season )(\d*)(?:.*?)(\d+)(?:.*?)(\d{3,4}\w).*'
+      - title:
+          extract: '(?:\[.+?\]) (.+?) (?:-\s)?(\d+)(?:.*?)(\d{3,4}\w).*'
+      - title:
+          extract: '(?:\[.+?\[)(.+?)\]\[(\d*)(?:\].+?\[)(.+?)\].*'
+      - title:
+          replace:            
+            regexp: '(.*) (\d+) (\d+) (\d*\w)'
+            format: '\1 - S0\2E\3 - \4'
+      - title:
+          replace:
+            regexp: '(.*) (\d+) (\d+\w)'
+            format: '\1 - E\2 - \3'
+  
+  size:
+    content_size:
+      min: 30
+      max: 666666
+      strict: no
+
+
+# Flexget WebUI 设定，可以保持为自己原本的状态
+web_server:
+  bind: 0.0.0.0
+  port: 5050
+  web_ui: yes
+
